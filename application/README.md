@@ -21,7 +21,10 @@ To get started with the Solution Plus Project, follow these steps:
     docker build -t container-name:v1 . 
     ```
 5. Compose Up:
-    docker compose -f docker-compose.yaml up  -d 
+   ```bash
+   docker compose -f docker-compose.yaml up  -d 
+   ```
+   
 
 
 ## Contributing
