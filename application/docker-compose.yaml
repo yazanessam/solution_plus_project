@@ -11,6 +11,7 @@ services:
       - PORT=${PORT}
     ports:
       - "4040:${PORT}"
+    restart: unless-stopped
     networks:
       - app-network
     depends_on:
