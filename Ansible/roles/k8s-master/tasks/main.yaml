@@ -1,7 +1,7 @@
 ---
 # tasks file for kubernetes_master
 - name: Run a local Bash script on remote hosts
-  script: ./restkube.sh
+  script: ./restkube.sh || true
 
 - name: Remove Keyrings Directory
   ansible.builtin.shell: rm -rf /etc/apt/keyrings
