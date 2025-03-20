@@ -1,6 +1,6 @@
 services:
   my-app:
-    image: belalelnady/solution-plus
+    image: image-name:v1
     container_name: u-container 
     environment:
       - APP_ENV=${APP_ENV}
