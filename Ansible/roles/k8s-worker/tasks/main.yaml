@@ -1,0 +1,4 @@
+---
+- name: Join Kubernetes Worker Node
+  command: "{{ hostvars['master']['worker_join_command'] }}"
+  when: hostvars['master']['worker_join_command'] is defined
