@@ -1,0 +1,35 @@
+---
+- name: Initialize Kubernetes cluster
+  shell: |
+    kubeadm init --pod-network-cidr=192.168.0.0/16
+
+- name: Copy kubeconfig to user directory
+  shell: |
+    mkdir -p $HOME/.kube
+    cp /etc/kubernetes/admin.conf $HOME/.kube/config
+    chown $(id -u):$(id -g) $HOME/.kube/config
+
+- name: Download and apply Calico network plugin
+  shell: |
+    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml
+
+- name: Wait for Calico pods to be ready
+  shell: |
+    kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=120s
+
+- name: Verify Calico pods
+  shell: kubectl get pods -n kube-system
+  register: calico_status
+
+- name: Display Calico pods status
+  debug:
+    msg: "{{ calico_status.stdout_lines }}"
+
+
+- name: Get Join Command
+  shell: kubeadm token create --print-join-command
+  register: join_command
+
+- name: Save Join Command
+  set_fact:
+    worker_join_command: "{{ join_command.stdout }}"
