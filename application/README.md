@@ -18,7 +18,7 @@ To get started with the Solution Plus Project, follow these steps:
 
 4.  Build the app :
     ```bash
-    docker build -t container-name:v1 . 
+    docker build -t image-name:v1 . 
     ```
 5. Compose Up:
    ```bash
