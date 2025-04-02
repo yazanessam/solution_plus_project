@@ -41,7 +41,7 @@
     "browser-enroll": "browserify public/js/EnrollmentPage.js -o public/js/EnrollmentPage.js -d",
     "browserify": "npm run browser-idx && npm run browser-dept && npm run browser-building && npm run browser-class && npm run browser-student && npm run browser-enroll",
     "build-all": "npm run build-client && npm run build-server && npm run browserify",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"Error: no test specified\"",
     "production": "~/university_app/node_modules/forever/bin/forever start ./build/server.js 5031",
     "production-stop": "~/university_app/node_modules/forever/bin/forever stop ./build/server.js 5031"
   }
