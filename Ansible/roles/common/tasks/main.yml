@@ -16,41 +16,57 @@
         state: started
         enabled: yes
 
-    - name: Create keyrings directory
+    - name: Remove Keyrings Directory
+      ansible.builtin.shell: rm -rf /etc/apt/keyrings
+
+    - name: Remove Existing Kubernetes Directory
+      ansible.builtin.shell: sudo rm -rf /etc/apt/sources.list.d/pkgs_k8s_io_core_stable_v1_30_deb.list
+
+    - name: Disable swap
+      ansible.builtin.command:
+        cmd: swapoff -a
+
+    - name: Ensure swap is disabled on boot
+      ansible.builtin.command:
+        cmd: sudo sed -i -e '/\/swap.img\s\+none\s\+swap\s\+sw\s\+0\s\+0/s/^/#/' /etc/fstab
+
+    - name: Load kernel parameter changes
+      ansible.builtin.command:
+        cmd: sudo sysctl --system
+
+    - name: Configuring Containerd (building the configuration file)
+      ansible.builtin.command:
+        cmd: sudo sh -c "containerd config default > /opt/containerd/config.toml"
+
+    - name: Configuring Containerd (Setting SystemdCgroup Variable to True)
+      ansible.builtin.command:
+        cmd: sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /opt/containerd/config.toml
+
+    - name: Reload systemd configuration
+      ansible.builtin.command:
+        cmd: systemctl daemon-reload
+
+    - name: Restart containerd service
+      ansible.builtin.service:
+        name: containerd
+        state: restarted
+
+    - name: Prepare keyrings directory and update permissions
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
 
-    - name: Download Kubernetes GPG key
-      ansible.builtin.get_url:
-        url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
-        dest: /tmp/kubernetes.key
-        mode: '0644'
-
-    - name: Import Kubernetes GPG key
-      ansible.builtin.shell: |
-        cat /tmp/kubernetes.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-      args:
-        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-
-    - name: Set permissions for Kubernetes GPG key
-      file:
-        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-        mode: '0644'
+    - name: Download Kubernetes GPG key securely
+      ansible.builtin.shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     - name: Add Kubernetes repository
       ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
         state: present
-        filename: kubernetes
 
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-
-    - name: Install Kubernetes packages
-      apt:
+    - name: Install kubeadm, kubelet, kubectl
+      ansible.builtin.apt:
         name:
           - kubelet
           - kubeadm
@@ -58,11 +74,20 @@
         state: present
         update_cache: yes
 
-    - name: Disable Swap
-      command: swapoff -a
+    - name: Hold kubelet, kubeadm, kubectl packages
+      ansible.builtin.command:
+        cmd: sudo apt-mark hold kubelet kubeadm kubectl
 
-    - name: Comment out swap in /etc/fstab
-      replace:
-        path: /etc/fstab
-        regexp: '^([^#].*\sswap\s.*)$'
-        replace: '# \1'
+    - name: Replace /etc/default/kubelet contents
+      ansible.builtin.copy:
+        dest: /etc/default/kubelet
+        content: 'KUBELET_EXTRA_ARGS="--cgroup-driver=cgroupfs"'
+
+    - name: Reload systemd configuration
+      ansible.builtin.command:
+        cmd: systemctl daemon-reload
+
+    - name: Restart kubelet service
+      ansible.builtin.service:
+        name: kubelet
+        state: restarted

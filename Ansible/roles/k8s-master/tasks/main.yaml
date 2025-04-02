@@ -1,30 +1,63 @@
 ---
-- name: Initialize Kubernetes cluster
-  shell: |
-    kubeadm init --pod-network-cidr=192.168.0.0/16
+# tasks file for kubernetes_master
+- name: Run a local Bash script on remote hosts
+  script: ./restkube.sh || true
 
-- name: Copy kubeconfig to user directory
-  shell: |
-    mkdir -p $HOME/.kube
-    cp /etc/kubernetes/admin.conf $HOME/.kube/config
-    chown $(id -u):$(id -g) $HOME/.kube/config
+- name: Update System-Wide Profile for Kubernetes
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubernetes.sh
+    content: |
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      export ANSIBLE_USER="sysadmin"
 
-- name: Download and apply Calico network plugin
-  shell: |
-    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml
+- name: Update Kubeadm Environment Variable
+  ansible.builtin.command:
+    cmd: sudo sed -i -e '/^\[Service\]/a Environment="KUBELET_EXTRA_ARGS=--fail-swap-on=false"' /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
 
-- name: Wait for Calico pods to be ready
-  shell: |
-    kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=120s
+- name: Reload systemd configuration
+  ansible.builtin.command:
+    cmd: systemctl daemon-reload
 
-- name: Verify Calico pods
-  shell: kubectl get pods -n kube-system
-  register: calico_status
+- name: Restart kubelet service
+  ansible.builtin.service:
+    name: kubelet
+    state: restarted
 
-- name: Display Calico pods status
-  debug:
-    msg: "{{ calico_status.stdout_lines }}"
+- name: Pull kubeadm container images
+  ansible.builtin.command:
+    cmd: sudo kubeadm config images pull
 
+- name: Initialize Kubernetes control plane
+  ansible.builtin.command:
+    cmd: kubeadm init --pod-network-cidr=10.244.0.0/16
+    creates: /tmp/kubeadm_output
+  register: kubeadm_init_output
+  changed_when: false
+
+- name: Set permissions for Kubernetes Admin
+  file:
+    path: /etc/kubernetes/admin.conf
+    state: file
+    mode: '0755'
+
+- name: Initialize Kubernetes control plane
+  ansible.builtin.command:
+    cmd: mkdir -p $HOME/.kube
+
+- name: Store Kubernetes initialization output to file
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: $HOME/.kube/config
+    remote_src: yes
+    owner: "$(id -u)"
+    group: "$(id -g)"
+    mode: '0644'
+
+- name: Install Flannel network plugin
+  ansible.builtin.shell: su - $ANSIBLE_USER -c "kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml"
+
+- name: Taint master node to prevent workload scheduling
+  ansible.builtin.shell: su - $ANSIBLE_USER -c "kubectl taint nodes --all node-role.kubernetes.io/control-plane-"
 
 - name: Get Join Command
   shell: kubeadm token create --print-join-command
