@@ -1,0 +1,109 @@
+pipeline {
+    agent {
+        node {
+            label 'jenkins-agent'
+            docker {
+                image 'node:18-alpine'
+                args '--rm -v npm-cache:/root/.npm'
+            }
+        }
+    }
+
+    environment {
+        DOCKER_CRED = credentials('DockerHub-Yazan')
+        KUBE_CONFIG = credentials('Kubeconfig-Yazan')
+        SLACK_TOKEN = credentials('slack-token-Yazan')
+    }
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+        stage('Code Linting') {
+            steps {
+                sh 'npm ci'
+                sh 'npx eslint . --quiet || true'
+            }
+        }
+
+        stage('Build & Security') {
+            parallel {
+                stage('Docker Build') {
+                    steps {
+                        script {
+                            writeFile(file: 'build_number.txt', text: "${env.BUILD_NUMBER}")
+                            sh '''
+                            export DOCKER_BUILDKIT=1
+                            PREVIOUS_BUILD_NUMBER=$(cat build_number.txt)
+                            docker build --platform=linux/amd64 --cache-from=my-app:${PREVIOUS_BUILD_NUMBER} -t my-app:${BUILD_NUMBER} .
+                            '''
+                        }
+                    }
+                }
+                stage('Trivy Scan') {
+                    steps {
+                        sh '''
+                        trivy image --severity HIGH,CRITICAL --format json -o trivy-report.json my-app:${BUILD_NUMBER}
+                        if grep -q '"VulnerabilityID":' trivy-report.json; then
+                            echo "❌ Security scan found vulnerabilities!"
+                            exit 1
+                        fi
+                        '''
+                    }
+                    post {
+                        always {
+                            archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+                        }
+                        failure {
+                            sh 'jq ".Results[] | select(.Vulnerabilities) | {Target, Vulnerabilities}" trivy-report.json > Vulns-report.json'
+                            slackSend channel: '#security-reports',
+                                      tokenCredentialId: 'slack-token-Yazan',
+                                      message: "⚠️ Security scan failed! Check the attached report.",
+                                      attachments: [[text: readFile('Vulns-report.json')]]
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withDockerRegistry([credentialsId: 'DockerHub-Yazan']) {
+                    sh 'docker push my-app:${BUILD_NUMBER}'
+                }
+            }
+        }
+
+        stage('Deployment') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                kubectl apply -f k8s/ -n k8s
+                kubectl set image deployment/my-app uni-app=yazanessam/my-app:${BUILD_NUMBER} -n k8s
+                kubectl rollout status deployment/my-app -n k8s --timeout=120s || (echo "Deployment failed!" && exit 1)
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+            sh 'docker rm $(docker ps -aq) || true'
+            sh 'docker rmi $(docker images -q --filter "dangling=true") || true'
+        }
+        success {
+            slackSend channel: '#solutionplus-final',
+                       tokenCredentialId: 'slack-token-Yazan',
+                       message: "✅ Build ${BUILD_NUMBER} succeeded! Deployed to Kubernetes."
+        }
+        failure {
+            slackSend channel: '#solutionplus-final',
+                       tokenCredentialId: 'slack-token-Yazan',
+                       message: "❌ Build ${BUILD_NUMBER} failed! Please check Jenkins logs."
+        }
+    }
+}
